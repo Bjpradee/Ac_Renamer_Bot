@@ -13,7 +13,7 @@ import math
 import sqlite3
 from PIL import Image
 from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from pyrogram.types import Message
 
 # 🔥 MULTI-THREADING IMPORTS 🔥
 from pyrogram.file_id import FileId
@@ -48,9 +48,9 @@ conn.commit()
 
 # --- GLOBAL STATES ---
 manual_rename_task = {}
-track_picker_state = {} 
+user_track_state = {}
 
-# 🔥 MASTER UPGRADE: Userbot (Premium Speed) Initialization 🔥
+# 🔥 PREMIUM USERBOT INITIALIZATION (Max Speed & High File Size Support) 🔥
 app = Client("anime_premium_userbot", session_string=STRING_SESSION, api_id=API_ID, api_hash=API_HASH)
 
 # --- HELPER FUNCTIONS ---
@@ -205,50 +205,6 @@ async def set_format(client, message):
     else:
         await message.reply_text("❌ Example:\n`/format [{season}-{episode}] {title} [{quality}] [{language}] @MyChannel`")
 
-# --- UI BUTTON HANDLER FOR AUDIO/SUB PICKER (LAPTOP STYLE) ---
-def get_picker_markup(uid):
-    s = track_picker_state[uid]
-    keys = []
-    for i, a in enumerate(s['audios']):
-        status = "✅" if s['a_sel'][i] else "❌"
-        tags = a.get('tags') or {}
-        lang = tags.get('language', f'Track {i+1}')
-        lang_str = str(lang).upper() if lang else f'Track {i+1}'
-        keys.append([InlineKeyboardButton(f"{status} Audio: {lang_str}", callback_data=f"t_a_{i}")])
-        
-    for i, sub in enumerate(s['subs']):
-        status = "✅" if s['s_sel'][i] else "❌"
-        tags = sub.get('tags') or {}
-        lang = tags.get('language', f'Sub {i+1}')
-        lang_str = str(lang).upper() if lang else f'Sub {i+1}'
-        keys.append([InlineKeyboardButton(f"{status} Subtitle: {lang_str}", callback_data=f"t_s_{i}")])
-    
-    keys.append([InlineKeyboardButton("🚀 Confirm & Process", callback_data="process_media")])
-    return InlineKeyboardMarkup(keys)
-
-@app.on_callback_query(filters.me | filters.user(ADMIN_ID))
-async def callback_handler(client, query: CallbackQuery):
-    uid = query.from_user.id
-    if uid not in track_picker_state:
-        return await query.answer("Session expired.", show_alert=True)
-    
-    data = query.data
-    if data.startswith("t_a_"):
-        idx = int(data.split("_")[2])
-        track_picker_state[uid]['a_sel'][idx] = not track_picker_state[uid]['a_sel'][idx]
-        try: await query.edit_message_reply_markup(get_picker_markup(uid))
-        except: pass
-    elif data.startswith("t_s_"):
-        idx = int(data.split("_")[2])
-        track_picker_state[uid]['s_sel'][idx] = not track_picker_state[uid]['s_sel'][idx]
-        try: await query.edit_message_reply_markup(get_picker_markup(uid))
-        except: pass
-    elif data == "process_media":
-        try: await query.message.delete()
-        except: pass
-        track_picker_state[uid]['event'].set()
-
-# --- METADATA, ASS & MANUAL LOGIC ---
 @app.on_message((filters.me | filters.user(ADMIN_ID)) & filters.command(["title", "videoname", "audioname", "subname"]))
 async def set_metadata(client, message):
     cmd = message.command[0]
@@ -261,7 +217,7 @@ async def set_metadata(client, message):
 
 @app.on_message((filters.me | filters.user(ADMIN_ID)) & filters.command("meta"))
 async def toggle_meta(client, message):
-    cursor.execute("SELECT meta_enabled WHERE user_id = ?", (ADMIN_ID,))
+    cursor.execute("SELECT meta_enabled FROM settings WHERE user_id = ?", (ADMIN_ID,))
     row = cursor.fetchone()
     new_state = 0 if (row and row[0]) else 1
     cursor.execute("UPDATE settings SET meta_enabled = ? WHERE user_id = ?", (new_state, ADMIN_ID))
@@ -297,12 +253,16 @@ async def set_manual_rename(client, message):
             manual_rename_task[ADMIN_ID] = custom_name
             await message.reply_text(f"📝 Next single file will be renamed to:\n`{custom_name}`")
 
-# --- MAIN PROCESSOR (LAPTOP CODE STYLE + JET SPEED + ASS EMBED FIX) ---
+# --- MAIN PROCESSOR WITH TEXT-BASED TRACK PICKER & .ASS EMBEDDING ---
 @app.on_message((filters.me | filters.user(ADMIN_ID)) & (filters.video | filters.document))
 async def process_media(client, message):
     if message.document and message.document.file_name and message.document.file_name.endswith(".ass"):
         await message.download(file_name=ASS_PATH)
         return await message.reply_text("📎 `.ass` Subtitle file saved! Turn it on using `/ass`")
+
+    uid = message.from_user.id
+    if uid in user_track_state:
+        return await message.reply_text("⚠️ Already processing a file! Please wait.")
 
     status = await message.reply_text("📥 Downloading to Server...")
     
@@ -333,48 +293,82 @@ async def process_media(client, message):
             new_file_name = original_name
 
         start_time = time.time()
-        
-        # 🔥 JET FAST DOWNLOAD FOR 2GB+ FILES 🔥
         input_path = os.path.join(DATA_DIR, "temp_download_" + new_file_name)
+        
+        # High-Speed Download
         await fast_download(client, message, input_path, status, start_time)
         
+        audios, subs = await get_media_streams(input_path)
+
+        selection = "all"
+        if len(audios) > 1 or len(subs) > 0:
+            msg_text = "🎛 **Multi-Audio & Subtitle Manager**\n\n"
+            msg_text += "🔊 **Audio Tracks:**\n"
+            for i, a in enumerate(audios):
+                tags = a.get('tags') or {}
+                lang = tags.get('language', f'Track {i+1}')
+                msg_text += f"  `a{i}` : Audio {i+1} ({lang})\n"
+                
+            msg_text += "\n💬 **Internal Subtitles:**\n"
+            for i, s in enumerate(subs):
+                tags = s.get('tags') or {}
+                lang = tags.get('language', f'Sub {i+1}')
+                msg_text += f"  `s{i}` : Sub {i+1} ({lang})\n"
+                
+            msg_text += "\n👉 **Send a message now** (e.g., `a0, a1`) with the tracks you want to **KEEP**.\n*(Or type `all` to keep everything, or `none` to drop internal subs)*"
+            
+            await status.delete()
+            prompt_msg = await message.reply_text(msg_text)
+            
+            future = asyncio.get_event_loop().create_future()
+            user_track_state[uid] = future
+            
+            try:
+                response = await asyncio.wait_for(future, timeout=90.0)
+                selection = response.text.lower().strip()
+                try: await response.delete()
+                except: pass
+                try: await prompt_msg.delete()
+                except: pass
+            except asyncio.TimeoutError:
+                selection = "all"
+                try: await prompt_msg.delete()
+                except: pass
+            finally:
+                user_track_state.pop(uid, None)
+            
+            status = await message.reply_text("⚙️ Processing Audio & .ass Subtitle Embedding...")
+        else:
+            status = await message.reply_text("⚙️ Processing Audio & .ass Subtitle Embedding...")
+
+        ffmpeg_inputs = f'-i "{input_path}" '
+        map_args = "-map 0:v:0? "
+        
+        if "all" in selection:
+            for i in range(len(audios)): map_args += f"-map 0:a:{i} "
+            if ass_on and os.path.exists(ASS_PATH):
+                ffmpeg_inputs += f'-i "{ASS_PATH}" '
+                map_args += "-map 1:0 -disposition:s:0 default "
+            else:
+                for i in range(len(subs)): map_args += f"-map 0:s:{i} "
+        elif "none" in selection:
+            for i in range(len(audios)):
+                if f"a{i}" in selection: map_args += f"-map 0:a:{i} "
+            if ass_on and os.path.exists(ASS_PATH):
+                ffmpeg_inputs += f'-i "{ASS_PATH}" '
+                map_args += "-map 1:0 -disposition:s:0 default "
+        else:
+            for i in range(len(audios)):
+                if f"a{i}" in selection: map_args += f"-map 0:a:{i} "
+            if ass_on and os.path.exists(ASS_PATH):
+                ffmpeg_inputs += f'-i "{ASS_PATH}" '
+                map_args += "-map 1:0 -disposition:s:0 default "
+            else:
+                for i in range(len(subs)):
+                    if f"s{i}" in selection: map_args += f"-map 0:s:{i} "
+
         output_path = os.path.join(os.path.dirname(input_path), new_file_name)
         temp_output_path = input_path + "_temp_out.mkv"
-
-        audios, subs = await get_media_streams(input_path)
-        
-        ffmpeg_inputs = f'-i "{input_path}" '
-        map_args = "-map 0:v:0 " 
-        
-        if len(audios) > 1 or len(subs) > 0:
-            track_picker_state[ADMIN_ID] = {
-                'audios': audios, 'subs': subs,
-                'a_sel': [True]*len(audios), 's_sel': [True]*len(subs),
-                'event': asyncio.Event()
-            }
-            try: await status.delete()
-            except: pass
-            picker_msg = await message.reply_text("🎛 **Select Tracks to Keep:**", reply_markup=get_picker_markup(ADMIN_ID))
-            
-            await track_picker_state[ADMIN_ID]['event'].wait()
-            status = await message.reply_text("⚙️ Processing with FFmpeg (Smart Format & Metadata)...")
-            
-            s = track_picker_state.pop(ADMIN_ID, {})
-            for i, keep in enumerate(s.get('a_sel', [])):
-                if keep: map_args += f"-map 0:a:{i} "
-                
-            if ass_on and os.path.exists(ASS_PATH):
-                ffmpeg_inputs += f'-i "{ASS_PATH}" '
-                map_args += "-map 1:0 -disposition:s:0 default "
-                
-            for i, keep in enumerate(s.get('s_sel', [])):
-                if keep: map_args += f"-map 0:s:{i} "
-        else:
-            map_args = "-map 0:v:0? -map 0:a? "
-            if ass_on and os.path.exists(ASS_PATH):
-                ffmpeg_inputs += f'-i "{ASS_PATH}" '
-                map_args += "-map 1:0 -disposition:s:0 default "
-            map_args += "-map 0:s? "
 
         cmd = f'ffmpeg -y {ffmpeg_inputs} {map_args} -c copy '
 
@@ -419,8 +413,17 @@ async def process_media(client, message):
         except: pass
         
     except Exception as e:
-        track_picker_state.pop(ADMIN_ID, None)
+        user_track_state.pop(uid, None)
         await status.edit_text(f"❌ Error: {e}")
 
-print("🚀 Premium Userbot Engine Running at High Speed with Laptop Style Buttons & ASS Fix... 🔥")
+# Global message listener to cleanly capture user track selection without loop issues
+@app.on_message((filters.me | filters.user(ADMIN_ID)) & filters.text)
+async def capture_user_input(client, message):
+    uid = message.from_user.id
+    if uid in user_track_state:
+        future = user_track_state[uid]
+        if not future.done():
+            future.set_result(message)
+
+print("🚀 Premium Userbot Engine Running with Fixed Track Selector & ASS Support... 🔥")
 app.run()
