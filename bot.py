@@ -15,11 +15,6 @@ from PIL import Image
 from pyrogram import Client, filters
 from pyrogram.types import Message
 
-# 🔥 MULTI-THREADING IMPORTS 🔥
-from pyrogram.file_id import FileId
-from pyrogram.raw.functions.upload import GetFile
-from pyrogram.raw.types import InputDocumentFileLocation
-
 # --- UNGA DETAILS (Imported from config.py) ---
 from config import API_ID, API_HASH, ADMIN_ID, STRING_SESSION
 
@@ -77,61 +72,6 @@ async def progress_bar(current, total, action, message, start_time):
         text = f"**{action}**\n\n[{progress_str}] {round(percentage, 2)}%\n🚀 **Speed:** {humanbytes(speed)}/s\n📦 **Size:** {humanbytes(current)} / {humanbytes(total)}\n⏱️ **ETA:** {eta}s"
         try: await message.edit_text(text)
         except: pass
-
-# 🔥 RAM-OPTIMIZED FAST DOWNLOADER (Prevents OOM Crashes) 🔥
-async def fast_download(client, message, output_path, status_msg, start_time):
-    media = message.document or message.video
-    file_size = media.file_size
-    
-    # 512KB Chunks & Safe Concurrent Tasks to stay well under Railway RAM limits
-    chunk_size = 512 * 1024 
-    total_parts = math.ceil(file_size / chunk_size)
-    max_concurrent_tasks = 3 
-    
-    await status_msg.edit_text(f"🚀 **JET DOWNLOAD STARTING (RAM SAFE)...**\n\n📦 Size: {humanbytes(file_size)}\n🔗 Connections: {max_concurrent_tasks}")
-    
-    decoded = FileId.decode(media.file_id)
-    location = InputDocumentFileLocation(
-        id=decoded.media_id, 
-        access_hash=decoded.access_hash, 
-        file_reference=decoded.file_reference, 
-        thumb_size=""
-    )
-
-    downloaded_size = 0
-    with open(output_path, "wb") as f:
-        if file_size > 0:
-            f.seek(file_size - 1)
-            f.write(b"\0")
-        
-    async def fetch_chunk(part_num):
-        offset = part_num * chunk_size
-        limit = chunk_size 
-        
-        chunk_data = await client.invoke(GetFile(
-            location=location,
-            offset=offset,
-            limit=limit
-        ))
-        
-        with open(output_path, "r+b") as f:
-            f.seek(offset)
-            f.write(chunk_data.bytes)
-            
-        return len(chunk_data.bytes)
-
-    for i in range(0, total_parts, max_concurrent_tasks):
-        tasks = []
-        for j in range(max_concurrent_tasks):
-            if i + j < total_parts:
-                tasks.append(fetch_chunk(i + j))
-                
-        results = await asyncio.gather(*tasks)
-        downloaded_size += sum(results)
-        
-        await progress_bar(downloaded_size, file_size, "🚀 Jet Downloading...", status_msg, start_time)
-        
-    return output_path
 
 async def run_ffmpeg(cmd):
     process = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
@@ -254,7 +194,7 @@ async def set_manual_rename(client, message):
             manual_rename_task[ADMIN_ID] = custom_name
             await message.reply_text(f"📝 Next single file will be renamed to:\n`{custom_name}`")
 
-# --- MAIN PROCESSOR WITH RAM-SAFE DOWNLOADER ---
+# --- MAIN PROCESSOR WITH 100% RAM-SAFE STREAMING DOWNLOADER ---
 @app.on_message((filters.me | filters.user(ADMIN_ID)) & (filters.video | filters.document))
 async def process_media(client, message):
     if message.document and message.document.file_name and message.document.file_name.endswith(".ass"):
@@ -265,7 +205,7 @@ async def process_media(client, message):
     if uid in user_track_state:
         return await message.reply_text("⚠️ Already processing a file! Please wait.")
 
-    status = await message.reply_text("📥 Downloading to Server...")
+    status = await message.reply_text("📥 Downloading to Server (RAM Safe)...")
     
     try:
         cursor.execute("SELECT auto_format, meta_title, meta_video, meta_audio, meta_sub, meta_enabled, ass_enabled FROM settings WHERE user_id = ?", (ADMIN_ID,))
@@ -296,21 +236,13 @@ async def process_media(client, message):
         start_time = time.time()
         input_path = os.path.join(DATA_DIR, "temp_download_" + new_file_name)
         
-        # 🔥 RAM-SAFE DOWNLOAD WITH FALLBACK 🔥
-        try:
-            await fast_download(client, message, input_path, status, start_time)
-        except Exception as dc_err:
-            print(f"⚠️ Fast download error ({dc_err}), switching to standard downloader...")
-            if os.path.exists(input_path):
-                try: os.remove(input_path)
-                except: pass
-            await status.edit_text("🔄 Secure downloading...")
-            await client.download_media(
-                message,
-                file_name=input_path,
-                progress=progress_bar,
-                progress_args=("📥 Secure Downloading...", status, start_time)
-            )
+        # 🔥 USE RAM-SAFE NATIVE DOWNLOADER (Never Crashes on Railway Free Tier) 🔥
+        await client.download_media(
+            message,
+            file_name=input_path,
+            progress=progress_bar,
+            progress_args=("📥 Downloading...", status, start_time)
+        )
 
         if not os.path.exists(input_path):
             return await status.edit_text("❌ Error: Download failed or file not found on server!")
@@ -438,5 +370,5 @@ async def capture_user_reply(client, message):
             if not future.done():
                 future.set_result(message)
 
-print("🚀 Premium Userbot Engine Running with RAM-Safe Optimization... 🔥")
+print("🚀 Premium Userbot Engine Running with 100% RAM-Safe Native Streaming... 🔥")
 app.run()
