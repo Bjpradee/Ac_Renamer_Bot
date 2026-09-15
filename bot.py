@@ -78,7 +78,7 @@ async def progress_bar(current, total, action, message, start_time):
         try: await message.edit_text(text)
         except: pass
 
-# 🔥 IDM-STYLE MULTI-THREADED FAST DOWNLOADER FOR 2GB+ FILES 🔥
+# 🔥 IDM-STYLE MULTI-THREADED FAST DOWNLOADER WITH DC MIGRATION CATCHER 🔥
 async def fast_download(client, message, output_path, status_msg, start_time):
     media = message.document or message.video
     file_size = media.file_size
@@ -192,7 +192,7 @@ async def start_dashboard(client, message):
     meta_status = "🟢 ON" if data[5] else "🔴 OFF"
     ass_status = "🟢 ON" if data[6] else "🔴 OFF"
     
-    text = f"""**🤖 Bᴏᴛ Cᴏɴᴛʀᴏʟ Pᴀɴᴇʟ**\n\n**🖼 Tʜᴜᴍʙɴᴀɪʟ:** {thumb_status}\n\n**🎬 Mᴇᴛᴀᴅᴀᴛᴀ Sᴛᴀᴛᴜs:** {meta_status}\n ▸ Title: `{data[1] or 'Not Set'}`\n ▸ Video: `{data[2] or 'Not Set'}`\n ▸ Audio: `{data[3] or 'Not Set'}`\n ▸ Sub: `{data[4] or 'Not Set'}`\n\n**💬 Sᴜʙᴛɪᴛʟᴇ (.ᴀss):** {ass_status}\n\n**📝 Aᴜᴛᴏ-Rᴇɴᴀᴍᴇ Fᴏʀᴍᴀᴛ:** \n`{data[0] or 'Not Set'}`"""
+    text = f"""**🤖 Bᴏᴛ Cᴏɴᴛʀᴏʟ Pᴀɴᴇʟ**\n\n**🖼 Tʜᴜᴍʙɴᴀɪʟ:** {thumb_status}\n\n**🎬 Mᴇᴛᴀᴅᴀᴛᴀ Sᴛᴀᴛᴜs:** {meta_status}\n ▸ Title: `{data[1] or 'Not Set'}`\n ▸ Video: `{data[2] or 'Not Set'}`\n ▸ Audio: `{data[3] or 'Not Set'}`\n ▸ Sub: `{data[4] or 'Not Set'}`\n\n**💬 Sᴜʙᴛɪᴛʟᴇ (.ᴀss):** {ass_status}\n\n**📝 Aᴜᴛᴏ-Rᴇɴᴀᴍᴇ Fᴏʀᴍ𝚊ᴛ:** \n`{data[0] or 'Not Set'}`"""
     await message.reply_text(text)
 
 @app.on_message((filters.me | filters.user(ADMIN_ID)) & filters.command("format"))
@@ -253,7 +253,7 @@ async def set_manual_rename(client, message):
             manual_rename_task[ADMIN_ID] = custom_name
             await message.reply_text(f"📝 Next single file will be renamed to:\n`{custom_name}`")
 
-# --- MAIN PROCESSOR WITH TEXT-BASED TRACK PICKER & .ASS EMBEDDING ---
+# --- MAIN PROCESSOR WITH AUTO-DC MIGRATION FALLBACK ---
 @app.on_message((filters.me | filters.user(ADMIN_ID)) & (filters.video | filters.document))
 async def process_media(client, message):
     if message.document and message.document.file_name and message.document.file_name.endswith(".ass"):
@@ -295,8 +295,21 @@ async def process_media(client, message):
         start_time = time.time()
         input_path = os.path.join(DATA_DIR, "temp_download_" + new_file_name)
         
-        # High-Speed Download
-        await fast_download(client, message, input_path, status, start_time)
+        # 🔥 SMART DOWNLOAD WITH DC MIGRATION FALLBACK 🔥
+        try:
+            await fast_download(client, message, input_path, status, start_time)
+        except Exception as dc_err:
+            print(f"⚠️ Fast download DC Migrate error ({dc_err}), switching to standard downloader...")
+            if os.path.exists(input_path):
+                try: os.remove(input_path)
+                except: pass
+            await status.edit_text("🔄 File is on another Data Center. Switching to secure download mode...")
+            await client.download_media(
+                message,
+                file_name=input_path,
+                progress=progress_bar,
+                progress_args=("📥 Secure Downloading...", status, start_time)
+            )
         
         audios, subs = await get_media_streams(input_path)
 
@@ -315,13 +328,13 @@ async def process_media(client, message):
                 lang = tags.get('language', f'Sub {i+1}')
                 msg_text += f"  `s{i}` : Sub {i+1} ({lang})\n"
                 
-            msg_text += "\n👉 **Send a message now** (e.g., `a0, a1`) with the tracks you want to **KEEP**.\n*(Or type `all` to keep everything, or `none` to drop internal subs)*"
+            msg_text += "\n👉 **Reply to this message** with the tracks you want to **KEEP** (Example: `a0, a1`).\n*(Or type `all` to keep everything)*"
             
             await status.delete()
             prompt_msg = await message.reply_text(msg_text)
             
             future = asyncio.get_event_loop().create_future()
-            user_track_state[uid] = future
+            user_track_state[uid] = {'prompt_id': prompt_msg.id, 'future': future}
             
             try:
                 response = await asyncio.wait_for(future, timeout=90.0)
@@ -351,12 +364,6 @@ async def process_media(client, message):
                 map_args += "-map 1:0 -disposition:s:0 default "
             else:
                 for i in range(len(subs)): map_args += f"-map 0:s:{i} "
-        elif "none" in selection:
-            for i in range(len(audios)):
-                if f"a{i}" in selection: map_args += f"-map 0:a:{i} "
-            if ass_on and os.path.exists(ASS_PATH):
-                ffmpeg_inputs += f'-i "{ASS_PATH}" '
-                map_args += "-map 1:0 -disposition:s:0 default "
         else:
             for i in range(len(audios)):
                 if f"a{i}" in selection: map_args += f"-map 0:a:{i} "
@@ -416,14 +423,16 @@ async def process_media(client, message):
         user_track_state.pop(uid, None)
         await status.edit_text(f"❌ Error: {e}")
 
-# Global message listener to cleanly capture user track selection without loop issues
+# Global message listener to cleanly capture the reply for track selection
 @app.on_message((filters.me | filters.user(ADMIN_ID)) & filters.text)
-async def capture_user_input(client, message):
+async def capture_user_reply(client, message):
     uid = message.from_user.id
     if uid in user_track_state:
-        future = user_track_state[uid]
-        if not future.done():
-            future.set_result(message)
+        state = user_track_state[uid]
+        if message.reply_to_message and message.reply_to_message.id == state['prompt_id']:
+            future = state['future']
+            if not future.done():
+                future.set_result(message)
 
-print("🚀 Premium Userbot Engine Running with Fixed Track Selector & ASS Support... 🔥")
+print("🚀 Premium Userbot Engine Running with DC Migration Fallback... 🔥")
 app.run()
