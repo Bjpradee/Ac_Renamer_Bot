@@ -23,10 +23,11 @@ from pyrogram.raw.types import InputDocumentFileLocation
 # --- UNGA DETAILS (Imported from config.py) ---
 from config import API_ID, API_HASH, ADMIN_ID, STRING_SESSION
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-THUMB_PATH = os.path.join(BASE_DIR, "thumbnail.jpg")
-ASS_PATH = os.path.join(BASE_DIR, "subtitle.ass")
-DB_PATH = os.path.join(BASE_DIR, "bot_database.db")
+# 🔥 PERMANENT STORAGE FIX 🔥
+DATA_DIR = "/data" if os.path.exists("/data") else os.path.dirname(os.path.abspath(__file__))
+THUMB_PATH = os.path.join(DATA_DIR, "thumbnail.jpg")
+ASS_PATH = os.path.join(DATA_DIR, "subtitle.ass")
+DB_PATH = os.path.join(DATA_DIR, "bot_database.db")
 
 # --- DATABASE SETUP ---
 conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -326,7 +327,7 @@ async def process_media(client, message):
         start_time = time.time()
         
         # 🔥 THE JET DOWNLOADER MAGIC STARTS HERE 🔥
-        input_path = os.path.join(BASE_DIR, "temp_download_" + new_file_name)
+        input_path = os.path.join(DATA_DIR, "temp_download_" + new_file_name)
         await fast_download(client, message, input_path, status, start_time)
         
         output_path = os.path.join(os.path.dirname(input_path), new_file_name)
