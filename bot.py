@@ -15,6 +15,11 @@ from PIL import Image
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 
+# 🔥 MULTI-THREADING IMPORTS 🔥
+from pyrogram.file_id import FileId
+from pyrogram.raw.functions.upload import GetFile
+from pyrogram.raw.types import InputDocumentFileLocation
+
 # --- UNGA DETAILS (Imported from config.py) ---
 from config import API_ID, API_HASH, ADMIN_ID, STRING_SESSION
 
@@ -71,6 +76,67 @@ async def progress_bar(current, total, action, message, start_time):
         text = f"**{action}**\n\n[{progress_str}] {round(percentage, 2)}%\n🚀 **Speed:** {humanbytes(speed)}/s\n📦 **Size:** {humanbytes(current)} / {humanbytes(total)}\n⏱️ **ETA:** {eta}s"
         try: await message.edit_text(text)
         except: pass
+
+# 🔥 IDM-STYLE MULTI-THREADED FAST DOWNLOADER 🔥
+async def fast_download(client, message, output_path, status_msg, start_time):
+    media = message.document or message.video
+    file_size = media.file_size
+    
+    # 1MB Chunks - Telegram's max per request
+    chunk_size = 1024 * 1024 
+    total_parts = math.ceil(file_size / chunk_size)
+    
+    # 10 Parallel Connections (Like IDM)
+    max_concurrent_tasks = 10 
+    
+    await status_msg.edit_text(f"🚀 **JET DOWNLOAD STARTING...**\n\n📦 Size: {humanbytes(file_size)}\n🔗 Connections: {max_concurrent_tasks}")
+    
+    # Getting File Location for Raw API
+    decoded = FileId.decode(media.file_id)
+    location = InputDocumentFileLocation(
+        id=decoded.media_id, 
+        access_hash=decoded.access_hash, 
+        file_reference=decoded.file_reference, 
+        thumb_size=""
+    )
+
+    downloaded_size = 0
+    with open(output_path, "wb") as f:
+        # Pre-allocate file space
+        if file_size > 0:
+            f.seek(file_size - 1)
+            f.write(b"\0")
+        
+    async def fetch_chunk(part_num):
+        offset = part_num * chunk_size
+        limit = chunk_size if (offset + chunk_size) <= file_size else (file_size - offset)
+        
+        chunk_data = await client.invoke(GetFile(
+            location=location,
+            offset=offset,
+            limit=limit
+        ))
+        
+        with open(output_path, "r+b") as f:
+            f.seek(offset)
+            f.write(chunk_data.bytes)
+            
+        return len(chunk_data.bytes)
+
+    # Executing 10 tasks at the same time
+    for i in range(0, total_parts, max_concurrent_tasks):
+        tasks = []
+        for j in range(max_concurrent_tasks):
+            if i + j < total_parts:
+                tasks.append(fetch_chunk(i + j))
+                
+        results = await asyncio.gather(*tasks)
+        downloaded_size += sum(results)
+        
+        # Update progress UI every 10 chunks to avoid flood limit
+        await progress_bar(downloaded_size, file_size, "🚀 Jet Downloading...", status_msg, start_time)
+        
+    return output_path
 
 async def run_ffmpeg(cmd):
     process = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
@@ -192,7 +258,6 @@ async def toggle_meta(client, message):
     conn.commit()
     await message.reply_text(f"🎬 Metadata is now **{'ON 🟢' if new_state else 'OFF 🔴'}**")
 
-# 🔥 PUTHUSA ADD PANNA /ass COMMAND 🔥
 @app.on_message((filters.me | filters.user(ADMIN_ID)) & filters.command("ass"))
 async def toggle_ass(client, message):
     cursor.execute("SELECT ass_enabled FROM settings WHERE user_id = ?", (ADMIN_ID,))
@@ -228,7 +293,7 @@ async def process_media(client, message):
         await message.download(file_name=ASS_PATH)
         return await message.reply_text("📎 `.ass` Subtitle file saved! Turn it on using `/ass`")
 
-    status = await message.reply_text("📥 Downloading to server...")
+    status = await message.reply_text("📥 Downloading to Server...")
     
     try:
         cursor.execute("SELECT auto_format, meta_title, meta_video, meta_audio, meta_sub, meta_enabled, ass_enabled FROM settings WHERE user_id = ?", (ADMIN_ID,))
@@ -257,7 +322,10 @@ async def process_media(client, message):
             new_file_name = original_name
 
         start_time = time.time()
-        input_path = await client.download_media(message, progress=progress_bar, progress_args=("📥 Downloading...", status, start_time))
+        
+        # 🔥 THE JET DOWNLOADER MAGIC STARTS HERE 🔥
+        input_path = os.path.join(BASE_DIR, "temp_download_" + new_file_name)
+        await fast_download(client, message, input_path, status, start_time)
         
         output_path = os.path.join(os.path.dirname(input_path), new_file_name)
         temp_output_path = input_path + "_temp_out.mkv"
