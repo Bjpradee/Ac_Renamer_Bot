@@ -110,8 +110,6 @@ async def fast_download(client, message, output_path, status_msg, start_time):
         
     async def fetch_chunk(part_num):
         offset = part_num * chunk_size
-        
-        # 🔥 Telegram API limit fix: Eppovume 1MB thaan kekkanum 🔥
         limit = chunk_size 
         
         chunk_data = await client.invoke(GetFile(
@@ -126,7 +124,6 @@ async def fast_download(client, message, output_path, status_msg, start_time):
             
         return len(chunk_data.bytes)
 
-    # Executing 10 tasks at the same time
     for i in range(0, total_parts, max_concurrent_tasks):
         tasks = []
         for j in range(max_concurrent_tasks):
@@ -136,7 +133,6 @@ async def fast_download(client, message, output_path, status_msg, start_time):
         results = await asyncio.gather(*tasks)
         downloaded_size += sum(results)
         
-        # Update progress UI every 10 chunks to avoid flood limit
         await progress_bar(downloaded_size, file_size, "🚀 Jet Downloading...", status_msg, start_time)
         
     return output_path
@@ -150,15 +146,22 @@ async def run_ffmpeg(cmd):
     return True
 
 async def get_media_streams(file_path):
-    cmd = f'ffprobe -v quiet -print_format json -show_streams "{file_path}"'
+    cmd = f'/usr/bin/ffprobe -v quiet -print_format json -show_streams "{file_path}"'
     process = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-    stdout, _ = await process.communicate()
+    stdout, stderr = await process.communicate()
+    
+    if process.returncode != 0:
+        cmd = f'ffprobe -v quiet -print_format json -show_streams "{file_path}"'
+        process = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        stdout, _ = await process.communicate()
+
     try:
         data = json.loads(stdout)
         audios = [s for s in data.get('streams', []) if s.get('codec_type') == 'audio']
         subs = [s for s in data.get('streams', []) if s.get('codec_type') == 'subtitle']
         return audios, subs
-    except:
+    except Exception as e:
+        print(f"❌ FFPROBE ERROR: {e}")
         return [], []
 
 # --- SMART AUTO-RENAME LOGIC ---
@@ -207,18 +210,23 @@ async def set_format(client, message):
     else:
         await message.reply_text("❌ Example:\n`/format [{season}-{episode}] {title} [{quality}] [{language}] @MyChannel`")
 
-# --- UI BUTTON HANDLER FOR AUDIO/SUB PICKER ---
+# --- UI BUTTON HANDLER FOR AUDIO/SUB PICKER (SAFE PARSING) ---
 def get_picker_markup(uid):
     s = track_picker_state[uid]
     keys = []
     for i, a in enumerate(s['audios']):
         status = "✅" if s['a_sel'][i] else "❌"
-        lang = a.get('tags', {}).get('language', f'Track {i+1}').upper()
-        keys.append([InlineKeyboardButton(f"{status} Audio: {lang}", callback_data=f"t_a_{i}")])
+        tags = a.get('tags') or {}
+        lang = tags.get('language', f'Track {i+1}')
+        lang_str = str(lang).upper() if lang else f'Track {i+1}'
+        keys.append([InlineKeyboardButton(f"{status} Audio: {lang_str}", callback_data=f"t_a_{i}")])
+        
     for i, sub in enumerate(s['subs']):
         status = "✅" if s['s_sel'][i] else "❌"
-        lang = sub.get('tags', {}).get('language', f'Sub {i+1}').upper()
-        keys.append([InlineKeyboardButton(f"{status} Subtitle: {lang}", callback_data=f"t_s_{i}")])
+        tags = sub.get('tags') or {}
+        lang = tags.get('language', f'Sub {i+1}')
+        lang_str = str(lang).upper() if lang else f'Sub {i+1}'
+        keys.append([InlineKeyboardButton(f"{status} Subtitle: {lang_str}", callback_data=f"t_s_{i}")])
     
     keys.append([InlineKeyboardButton("🚀 Confirm & Process", callback_data="process_media")])
     return InlineKeyboardMarkup(keys)
