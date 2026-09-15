@@ -48,8 +48,9 @@ conn.commit()
 
 # --- GLOBAL STATES ---
 manual_rename_task = {}
+user_track_state = {}
 
-# 🔥 MASTER UPGRADE: Userbot (Premium Speed) Initialization 🔥
+# 🔥 PREMIUM USERBOT INITIALIZATION (Max Speed & High File Size Support) 🔥
 app = Client("anime_premium_userbot", session_string=STRING_SESSION, api_id=API_ID, api_hash=API_HASH)
 
 # --- HELPER FUNCTIONS ---
@@ -77,7 +78,7 @@ async def progress_bar(current, total, action, message, start_time):
         try: await message.edit_text(text)
         except: pass
 
-# 🔥 IDM-STYLE MULTI-THREADED FAST DOWNLOADER 🔥
+# 🔥 IDM-STYLE MULTI-THREADED FAST DOWNLOADER (Handles 2GB+ files instantly) 🔥
 async def fast_download(client, message, output_path, status_msg, start_time):
     media = message.document or message.video
     file_size = media.file_size
@@ -250,12 +251,16 @@ async def set_manual_rename(client, message):
             manual_rename_task[ADMIN_ID] = custom_name
             await message.reply_text(f"📝 Next single file will be renamed to:\n`{custom_name}`")
 
-# --- MAIN PROCESSOR WITH PROPER MULTI-AUDIO TRACK MAPPING ---
+# --- MAIN PROCESSOR WITH MULTI-AUDIO SELECTOR & .ASS SUBTITLE REMOVAL/EMBEDDING ---
 @app.on_message((filters.me | filters.user(ADMIN_ID)) & (filters.video | filters.document))
 async def process_media(client, message):
     if message.document and message.document.file_name and message.document.file_name.endswith(".ass"):
         await message.download(file_name=ASS_PATH)
         return await message.reply_text("📎 `.ass` Subtitle file saved! Turn it on using `/ass`")
+
+    uid = message.from_user.id
+    if uid in user_track_state:
+        return await message.reply_text("⚠️ Already processing a file! Please wait.")
 
     status = await message.reply_text("📥 Downloading to Server...")
     
@@ -287,27 +292,93 @@ async def process_media(client, message):
 
         start_time = time.time()
         input_path = os.path.join(DATA_DIR, "temp_download_" + new_file_name)
+        
+        # High-Speed Fast Download for 2GB+ Files
         await fast_download(client, message, input_path, status, start_time)
         
-        await status.edit_text("⚙️ Processing with FFmpeg (Mapping All Audio & Subtitles)...")
-        
         audios, subs = await get_media_streams(input_path)
-        
-        ffmpeg_inputs = f'-i "{input_path}" '
-        map_args = "-map 0:v:0? "
-        
-        # Map all available audio tracks cleanly
-        for i in range(len(audios)):
-            map_args += f"-map 0:a:{i} "
+
+        # 🔥 INTERACTIVE TRACK PICKER & SUBTITLE REMOVAL MANAGER 🔥
+        if len(audios) > 1 or len(subs) > 0:
+            msg_text = "🎛 **Multi-Audio & Subtitle Manager**\n\n"
+            msg_text += "🔊 **Audio Tracks:**\n"
+            for i, a in enumerate(audios):
+                tags = a.get('tags') or {}
+                lang = tags.get('language', f'Track {i+1}')
+                msg_text += f"  `a{i}` : Audio {i+1} ({lang})\n"
+                
+            msg_text += "\n💬 **Internal Subtitle Tracks (Old/Unwanted):**\n"
+            if subs:
+                for i, s in enumerate(subs):
+                    tags = s.get('tags') or {}
+                    lang = tags.get('language', f'Sub {i+1}')
+                    msg_text += f"  `s{i}` : Sub {i+1} ({lang})\n"
+            else:
+                msg_text += "  *(None found)*\n"
+                
+            msg_text += "\n👉 **Reply to this message** with the tracks you want to **KEEP** (Example: `a0, a1` to drop unwanted subs/audios).\n*(Or type `all` to keep everything, or `none` to remove all internal subtitles)*"
             
-        # Add External ASS Subtitle if enabled
-        if ass_on and os.path.exists(ASS_PATH):
-            ffmpeg_inputs += f'-i "{ASS_PATH}" '
-            map_args += "-map 1:0 -disposition:s:0 default "
+            await status.delete()
+            prompt_msg = await message.reply_text(msg_text)
             
-        # Map internal subtitle tracks if any
-        for i in range(len(subs)):
-            map_args += f"-map 0:s:{i} "
+            event = asyncio.Event()
+            user_track_state[uid] = {'event': event, 'selection': None}
+            
+            try:
+                @app.on_message(filters.user(uid) & filters.reply, group=1)
+                async def catch_reply(c, m: Message):
+                    if m.reply_to_message_id == prompt_msg.id:
+                        user_track_state[uid]['selection'] = m.text
+                        user_track_state[uid]['event'].set()
+                        await m.delete()
+                        await prompt_msg.delete()
+                        c.remove_handler(catch_reply)
+
+                await asyncio.wait_for(event.wait(), timeout=90.0)
+            except asyncio.TimeoutError:
+                user_track_state[uid]['selection'] = "all"
+                try: await prompt_msg.delete()
+                except: pass
+
+            selection = user_track_state[uid].get('selection', 'all').lower()
+            user_track_state.pop(uid, None)
+            
+            status = await message.reply_text("⚙️ Processing Audio Selection & Embedding .ass Subtitle...")
+            
+            ffmpeg_inputs = f'-i "{input_path}" '
+            map_args = "-map 0:v:0 "
+            
+            if "all" in selection:
+                for i in range(len(audios)): map_args += f"-map 0:a:{i} "
+                if ass_on and os.path.exists(ASS_PATH):
+                    ffmpeg_inputs += f'-i "{ASS_PATH}" '
+                    map_args += "-map 1:0 -disposition:s:0 default "
+                for i in range(len(subs)): map_args += f"-map 0:s:{i} "
+            elif "none" in selection:
+                for i in range(len(audios)):
+                    if f"a{i}" in selection: map_args += f"-map 0:a:{i} "
+                if ass_on and os.path.exists(ASS_PATH):
+                    ffmpeg_inputs += f'-i "{ASS_PATH}" '
+                    map_args += "-map 1:0 -disposition:s:0 default "
+            else:
+                for i in range(len(audios)):
+                    if f"a{i}" in selection: map_args += f"-map 0:a:{i} "
+                if ass_on and os.path.exists(ASS_PATH):
+                    ffmpeg_inputs += f'-i "{ASS_PATH}" '
+                    map_args += "-map 1:0 -disposition:s:0 default "
+                for i in range(len(subs)):
+                    if f"s{i}" in selection: map_args += f"-map 0:s:{i} "
+        else:
+            ffmpeg_inputs = f'-i "{input_path}" '
+            map_args = "-map 0:v:0? -map 0:a? "
+            if ass_on and os.path.exists(ASS_PATH):
+                ffmpeg_inputs += f'-i "{ASS_PATH}" '
+                map_args += "-map 1:0 -disposition:s:0 default "
+            if not ass_on:
+                map_args += "-map 0:s? "
+
+        output_path = os.path.join(os.path.dirname(input_path), new_file_name)
+        temp_output_path = input_path + "_temp_out.mkv"
 
         cmd = f'ffmpeg -y {ffmpeg_inputs} {map_args} -c copy '
 
@@ -322,8 +393,6 @@ async def process_media(client, message):
             if m_aud: cmd += f'-metadata:s:a title="{m_aud}" '
             if m_sub: cmd += f'-metadata:s:s title="{m_sub}" '
         
-        output_path = os.path.join(os.path.dirname(input_path), new_file_name)
-        temp_output_path = input_path + "_temp_out.mkv"
         cmd += f'"{temp_output_path}"'
 
         success = await run_ffmpeg(cmd)
@@ -340,6 +409,7 @@ async def process_media(client, message):
         thumb_to_send = THUMB_PATH if os.path.exists(THUMB_PATH) else None
         start_time = time.time()
         
+        # High Speed Upload for Processed File
         await client.send_document(
             chat_id=message.chat.id,
             document=output_path,
@@ -353,7 +423,8 @@ async def process_media(client, message):
         await status.delete()
         
     except Exception as e:
+        user_track_state.pop(uid, None)
         await status.edit_text(f"❌ Error: {e}")
 
-print("🚀 Premium Userbot Engine Running at High Speed... 🔥")
+print("🚀 Premium Userbot Engine Running at High Speed with Audio/Sub Tools... 🔥")
 app.run()
