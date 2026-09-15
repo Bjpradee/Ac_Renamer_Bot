@@ -2,7 +2,7 @@
 FROM python:3.10-slim
 
 # Railway-a force panni FFmpeg install panna vaikkurom! 🔥
-RUN apt-get update && apt-get install -y ffmpeg
+RUN apt-get update && apt-get install -y ffmpeg libavcodec-extra
 
 # Namma code-kaga oru folder create panrom
 WORKDIR /app
