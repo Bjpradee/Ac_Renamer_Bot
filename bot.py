@@ -50,7 +50,7 @@ conn.commit()
 manual_rename_task = {}
 user_track_state = {}
 
-# 🔥 PREMIUM USERBOT INITIALIZATION (Max Speed & High File Size Support) 🔥
+# 🔥 PREMIUM USERBOT INITIALIZATION 🔥
 app = Client("anime_premium_userbot", session_string=STRING_SESSION, api_id=API_ID, api_hash=API_HASH)
 
 # --- HELPER FUNCTIONS ---
@@ -78,16 +78,17 @@ async def progress_bar(current, total, action, message, start_time):
         try: await message.edit_text(text)
         except: pass
 
-# 🔥 IDM-STYLE MULTI-THREADED FAST DOWNLOADER WITH DC MIGRATION CATCHER 🔥
+# 🔥 RAM-OPTIMIZED FAST DOWNLOADER (Prevents OOM Crashes) 🔥
 async def fast_download(client, message, output_path, status_msg, start_time):
     media = message.document or message.video
     file_size = media.file_size
     
-    chunk_size = 1024 * 1024 
+    # 512KB Chunks & Safe Concurrent Tasks to stay well under Railway RAM limits
+    chunk_size = 512 * 1024 
     total_parts = math.ceil(file_size / chunk_size)
-    max_concurrent_tasks = 10 
+    max_concurrent_tasks = 3 
     
-    await status_msg.edit_text(f"🚀 **JET DOWNLOAD STARTING...**\n\n📦 Size: {humanbytes(file_size)}\n🔗 Connections: {max_concurrent_tasks}")
+    await status_msg.edit_text(f"🚀 **JET DOWNLOAD STARTING (RAM SAFE)...**\n\n📦 Size: {humanbytes(file_size)}\n🔗 Connections: {max_concurrent_tasks}")
     
     decoded = FileId.decode(media.file_id)
     location = InputDocumentFileLocation(
@@ -253,7 +254,7 @@ async def set_manual_rename(client, message):
             manual_rename_task[ADMIN_ID] = custom_name
             await message.reply_text(f"📝 Next single file will be renamed to:\n`{custom_name}`")
 
-# --- MAIN PROCESSOR WITH FOOLPROOF PATH HANDLING ---
+# --- MAIN PROCESSOR WITH RAM-SAFE DOWNLOADER ---
 @app.on_message((filters.me | filters.user(ADMIN_ID)) & (filters.video | filters.document))
 async def process_media(client, message):
     if message.document and message.document.file_name and message.document.file_name.endswith(".ass"):
@@ -295,17 +296,15 @@ async def process_media(client, message):
         start_time = time.time()
         input_path = os.path.join(DATA_DIR, "temp_download_" + new_file_name)
         
-        # 🔥 SMART DOWNLOAD WITH DC MIGRATION & PATH CHECK 🔥
+        # 🔥 RAM-SAFE DOWNLOAD WITH FALLBACK 🔥
         try:
             await fast_download(client, message, input_path, status, start_time)
         except Exception as dc_err:
-            print(f"⚠️ Fast download DC Migrate error ({dc_err}), switching to secure downloader...")
+            print(f"⚠️ Fast download error ({dc_err}), switching to standard downloader...")
             if os.path.exists(input_path):
                 try: os.remove(input_path)
                 except: pass
-            await status.edit_text("🔄 File is on another Data Center. Secure downloading...")
-            
-            # Use client.download_media directly into input_path
+            await status.edit_text("🔄 Secure downloading...")
             await client.download_media(
                 message,
                 file_name=input_path,
@@ -313,7 +312,6 @@ async def process_media(client, message):
                 progress_args=("📥 Secure Downloading...", status, start_time)
             )
 
-        # Verify file actually exists before proceeding
         if not os.path.exists(input_path):
             return await status.edit_text("❌ Error: Download failed or file not found on server!")
         
@@ -440,5 +438,5 @@ async def capture_user_reply(client, message):
             if not future.done():
                 future.set_result(message)
 
-print("🚀 Premium Userbot Engine Running with Safe Path Validation... 🔥")
+print("🚀 Premium Userbot Engine Running with RAM-Safe Optimization... 🔥")
 app.run()
