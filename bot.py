@@ -253,7 +253,7 @@ async def set_manual_rename(client, message):
             manual_rename_task[ADMIN_ID] = custom_name
             await message.reply_text(f"📝 Next single file will be renamed to:\n`{custom_name}`")
 
-# --- MAIN PROCESSOR WITH BULLETPROOF PATH FALLBACK ---
+# --- MAIN PROCESSOR WITH FOOLPROOF PATH HANDLING ---
 @app.on_message((filters.me | filters.user(ADMIN_ID)) & (filters.video | filters.document))
 async def process_media(client, message):
     if message.document and message.document.file_name and message.document.file_name.endswith(".ass"):
@@ -295,23 +295,27 @@ async def process_media(client, message):
         start_time = time.time()
         input_path = os.path.join(DATA_DIR, "temp_download_" + new_file_name)
         
-        # 🔥 SMART DOWNLOAD WITH PATH ALIGNMENT FALLBACK 🔥
+        # 🔥 SMART DOWNLOAD WITH DC MIGRATION & PATH CHECK 🔥
         try:
             await fast_download(client, message, input_path, status, start_time)
         except Exception as dc_err:
-            print(f"⚠️ Fast download DC Migrate error ({dc_err}), switching to standard secure downloader...")
+            print(f"⚠️ Fast download DC Migrate error ({dc_err}), switching to secure downloader...")
             if os.path.exists(input_path):
                 try: os.remove(input_path)
                 except: pass
             await status.edit_text("🔄 File is on another Data Center. Secure downloading...")
             
-            # Download directly to input_path so path remains completely synchronized
+            # Use client.download_media directly into input_path
             await client.download_media(
                 message,
                 file_name=input_path,
                 progress=progress_bar,
                 progress_args=("📥 Secure Downloading...", status, start_time)
             )
+
+        # Verify file actually exists before proceeding
+        if not os.path.exists(input_path):
+            return await status.edit_text("❌ Error: Download failed or file not found on server!")
         
         audios, subs = await get_media_streams(input_path)
 
@@ -436,5 +440,5 @@ async def capture_user_reply(client, message):
             if not future.done():
                 future.set_result(message)
 
-print("🚀 Premium Userbot Engine Running with Synchronized Path Fallback... 🔥")
+print("🚀 Premium Userbot Engine Running with Safe Path Validation... 🔥")
 app.run()
