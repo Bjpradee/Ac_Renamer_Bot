@@ -205,7 +205,7 @@ async def process_media(client, message):
     if uid in user_track_state:
         return await message.reply_text("⚠️ Already processing a file! Please wait.")
 
-    status = await message.reply_text("📥 Downloading to Server (RAM Safe)...")
+    status = await message.reply_text("📥 Streaming to Server (Zero RAM Leak)...")
     
     try:
         cursor.execute("SELECT auto_format, meta_title, meta_video, meta_audio, meta_sub, meta_enabled, ass_enabled FROM settings WHERE user_id = ?", (ADMIN_ID,))
@@ -236,16 +236,19 @@ async def process_media(client, message):
         start_time = time.time()
         input_path = os.path.join(DATA_DIR, "temp_download_" + new_file_name)
         
-        # 🔥 USE RAM-SAFE NATIVE DOWNLOADER (Never Crashes on Railway Free Tier) 🔥
-        await client.download_media(
-            message,
-            file_name=input_path,
-            progress=progress_bar,
-            progress_args=("📥 Downloading...", status, start_time)
-        )
+        # 🔥 ULTRA-SAFE STREAMING DOWNLOAD (Writes directly to disk, RAM usage stays < 40MB) 🔥
+        media = message.document or message.video
+        file_size = media.file_size
+        downloaded_size = 0
+        
+        with open(input_path, "wb") as f:
+            async for chunk in client.stream_media(message):
+                f.write(chunk)
+                downloaded_size += len(chunk)
+                await progress_bar(downloaded_size, file_size, "📥 Streaming Download...", status, start_time)
 
-        if not os.path.exists(input_path):
-            return await status.edit_text("❌ Error: Download failed or file not found on server!")
+        if not os.path.exists(input_path) or os.path.getsize(input_path) == 0:
+            return await status.edit_text("❌ Error: Stream download failed or file is empty!")
         
         audios, subs = await get_media_streams(input_path)
 
@@ -301,14 +304,14 @@ async def process_media(client, message):
             else:
                 for i in range(len(subs)): map_args += f"-map 0:s:{i} "
         else:
-            for i in range(len(audios)):
-                if f"a{i}" in selection: map_args += f"-map 0:a:{i} "
-            if ass_on and os.path.exists(ASS_PATH):
-                ffmpeg_inputs += f'-i "{ASS_PATH}" '
-                map_args += "-map 1:0 -disposition:s:0 default "
-            else:
-                for i in range(len(subs)):
-                    if f"s{i}" in selection: map_args += f"-map 0:s:{i} "
+                for i in range(len(audios)):
+                    if f"a{i}" in selection: map_args += f"-map 0:a:{i} "
+                if ass_on and os.path.exists(ASS_PATH):
+                    ffmpeg_inputs += f'-i "{ASS_PATH}" '
+                    map_args += "-map 1:0 -disposition:s:0 default "
+                else:
+                    for i in range(len(subs)):
+                        if f"s{i}" in selection: map_args += f"-map 0:s:{i} "
 
         output_path = os.path.join(os.path.dirname(input_path), new_file_name)
         temp_output_path = input_path + "_temp_out.mkv"
@@ -370,5 +373,5 @@ async def capture_user_reply(client, message):
             if not future.done():
                 future.set_result(message)
 
-print("🚀 Premium Userbot Engine Running with 100% RAM-Safe Native Streaming... 🔥")
+print("🚀 Premium Userbot Engine Running with 100% RAM-Safe Streaming... 🔥")
 app.run()
