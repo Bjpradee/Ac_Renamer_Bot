@@ -192,7 +192,7 @@ async def start_dashboard(client, message):
     meta_status = "🟢 ON" if data[5] else "🔴 OFF"
     ass_status = "🟢 ON" if data[6] else "🔴 OFF"
     
-    text = f"""**🤖 Bᴏᴛ Cᴏɴᴛʀᴏʟ Pᴀɴᴇʟ**\n\n**🖼 Tʜᴜᴍʙɴᴀɪʟ:** {thumb_status}\n\n**🎬 Mᴇᴛᴀᴅᴀᴛᴀ Sᴛᴀᴛᴜs:** {meta_status}\n ▸ Title: `{data[1] or 'Not Set'}`\n ▸ Video: `{data[2] or 'Not Set'}`\n ▸ Audio: `{data[3] or 'Not Set'}`\n ▸ Sub: `{data[4] or 'Not Set'}`\n\n**💬 Sᴜʙᴛɪᴛʟᴇ (.ᴀss):** {ass_status}\n\n**📝 Aᴜᴛᴏ-Rᴇɴᴀᴍᴇ Fᴏʀᴍ𝚊ᴛ:** \n`{data[0] or 'Not Set'}`"""
+    text = f"""**🤖 Bᴏᴛ Cᴏɴᴛʀᴏʟ Pᴀɴᴇʟ**\n\n**🖼 Tʜᴜᴍʙɴᴀɪʟ:** {thumb_status}\n\n**🎬 Mᴇᴛᴀᴅᴀᴛᴀ Sᴛᴀᴛᴜs:** {meta_status}\n ▸ Title: `{data[1] or 'Not Set'}`\n ▸ Video: `{data[2] or 'Not Set'}`\n ▸ Audio: `{data[3] or 'Not Set'}`\n ▸ Sub: `{data[4] or 'Not Set'}`\n\n**💬 Sᴜʙᴛɪᴛʟᴇ (.ᴀss):** {ass_status}\n\n**📝 Aᴜᴛᴏ-Rᴇɴᴀᴍᴇ Fᴏʀᴍᴀᴛ:** \n`{data[0] or 'Not Set'}`"""
     await message.reply_text(text)
 
 @app.on_message((filters.me | filters.user(ADMIN_ID)) & filters.command("format"))
@@ -253,7 +253,7 @@ async def set_manual_rename(client, message):
             manual_rename_task[ADMIN_ID] = custom_name
             await message.reply_text(f"📝 Next single file will be renamed to:\n`{custom_name}`")
 
-# --- MAIN PROCESSOR WITH AUTO-DC MIGRATION FALLBACK ---
+# --- MAIN PROCESSOR WITH BULLETPROOF PATH FALLBACK ---
 @app.on_message((filters.me | filters.user(ADMIN_ID)) & (filters.video | filters.document))
 async def process_media(client, message):
     if message.document and message.document.file_name and message.document.file_name.endswith(".ass"):
@@ -295,15 +295,17 @@ async def process_media(client, message):
         start_time = time.time()
         input_path = os.path.join(DATA_DIR, "temp_download_" + new_file_name)
         
-        # 🔥 SMART DOWNLOAD WITH DC MIGRATION FALLBACK 🔥
+        # 🔥 SMART DOWNLOAD WITH PATH ALIGNMENT FALLBACK 🔥
         try:
             await fast_download(client, message, input_path, status, start_time)
         except Exception as dc_err:
-            print(f"⚠️ Fast download DC Migrate error ({dc_err}), switching to standard downloader...")
+            print(f"⚠️ Fast download DC Migrate error ({dc_err}), switching to standard secure downloader...")
             if os.path.exists(input_path):
                 try: os.remove(input_path)
                 except: pass
-            await status.edit_text("🔄 File is on another Data Center. Switching to secure download mode...")
+            await status.edit_text("🔄 File is on another Data Center. Secure downloading...")
+            
+            # Download directly to input_path so path remains completely synchronized
             await client.download_media(
                 message,
                 file_name=input_path,
@@ -434,5 +436,5 @@ async def capture_user_reply(client, message):
             if not future.done():
                 future.set_result(message)
 
-print("🚀 Premium Userbot Engine Running with DC Migration Fallback... 🔥")
+print("🚀 Premium Userbot Engine Running with Synchronized Path Fallback... 🔥")
 app.run()
