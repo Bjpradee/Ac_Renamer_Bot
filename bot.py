@@ -109,7 +109,9 @@ async def fast_download(client, message, output_path, status_msg, start_time):
         
     async def fetch_chunk(part_num):
         offset = part_num * chunk_size
-        limit = chunk_size if (offset + chunk_size) <= file_size else (file_size - offset)
+        
+        # 🔥 Telegram API limit fix: Eppovume 1MB thaan kekkanum 🔥
+        limit = chunk_size 
         
         chunk_data = await client.invoke(GetFile(
             location=location,
