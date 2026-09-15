@@ -192,6 +192,15 @@ async def toggle_meta(client, message):
     conn.commit()
     await message.reply_text(f"🎬 Metadata is now **{'ON 🟢' if new_state else 'OFF 🔴'}**")
 
+# 🔥 PUTHUSA ADD PANNA /ass COMMAND 🔥
+@app.on_message((filters.me | filters.user(ADMIN_ID)) & filters.command("ass"))
+async def toggle_ass(client, message):
+    cursor.execute("SELECT ass_enabled FROM settings WHERE user_id = ?", (ADMIN_ID,))
+    new_state = 0 if cursor.fetchone()[0] else 1
+    cursor.execute("UPDATE settings SET ass_enabled = ? WHERE user_id = ?", (new_state, ADMIN_ID))
+    conn.commit()
+    await message.reply_text(f"💬 Subtitle (.ass) is now **{'ON 🟢' if new_state else 'OFF 🔴'}**")
+
 @app.on_message((filters.me | filters.user(ADMIN_ID)) & filters.photo)
 async def save_thumbnail(client, message):
     temp_path = await message.download()
@@ -219,7 +228,7 @@ async def process_media(client, message):
         await message.download(file_name=ASS_PATH)
         return await message.reply_text("📎 `.ass` Subtitle file saved! Turn it on using `/ass`")
 
-    status = await message.reply_text("📥 Downloading to laptop...")
+    status = await message.reply_text("📥 Downloading to server...")
     
     try:
         cursor.execute("SELECT auto_format, meta_title, meta_video, meta_audio, meta_sub, meta_enabled, ass_enabled FROM settings WHERE user_id = ?", (ADMIN_ID,))
